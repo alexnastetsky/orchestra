@@ -1240,11 +1240,44 @@ def _pipeline_to_dict(pipeline: Pipeline) -> dict[str, Any]:
         "parameters": pipeline.parameters,
         "schedule": pipeline.schedule,
         "tags": pipeline.tags,
-        "tasks": [_activity_to_dict(task) for task in pipeline.tasks],
+        "tasks": _prune_dead_variable_inits([_activity_to_dict(task) for task in pipeline.tasks]),
     }
     if pipeline.translation_preferences is not None:
         result["translation_preferences"] = _preferences_to_dict(pipeline.translation_preferences)
     return result
+
+
+def _prune_dead_variable_inits(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop synthesised ``_init_<var>`` tasks that nothing references.
+
+    ``_build_variable_init_activities`` emits an ``_init_<var>`` SetVariable
+    task for every declared variable carrying a ``defaultValue`` so that a
+    read of the variable always has a concrete writer task to bind to.  When
+    an explicit ADF ``SetVariable`` activity dominates every read of that
+    variable, the translator re-points all reads at the explicit setter and
+    the init task becomes dead weight — it still runs on every execution and,
+    sharing the same ``key``, reads as a confusing duplicate of the real
+    setter.
+
+    This sweep runs after translation and expression rewriting are complete,
+    so every surviving reference is final.  An init task is kept only if its
+    task key still appears anywhere in the serialised IR of the *other* tasks
+    — either as a task-value reference (``{{tasks._init_x.values...}}``) or as
+    a ``depends_on`` edge.  Removing a task that is referenced nowhere can
+    never change behaviour, so this is always safe.
+    """
+    init_keys = {
+        t["task_key"]
+        for t in tasks
+        if isinstance(t.get("task_key"), str) and t["task_key"].startswith("_init_")
+    }
+    if not init_keys:
+        return tasks
+
+    others_blob = json.dumps([t for t in tasks if t.get("task_key") not in init_keys])
+    live_keys = {key for key in init_keys if key in others_blob}
+
+    return [t for t in tasks if t.get("task_key") not in init_keys or t["task_key"] in live_keys]
 
 
 def _preferences_to_dict(preferences: Any) -> dict[str, Any]:

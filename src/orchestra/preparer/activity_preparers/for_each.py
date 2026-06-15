@@ -122,8 +122,15 @@ def _render_for_each_inputs_bridge(
     The notebook computes the array value and publishes it via
     ``dbutils.jobs.taskValues.set`` so the parent ForEach task can
     reference it via ``{{tasks.<bridge>.values.items}}``.
+
+    The first line MUST be the ``# Databricks notebook source`` marker;
+    without it the workspace imports the file as a plain ``.py`` file and
+    ``databricks bundle validate`` rejects the ``notebook_task`` with
+    "expected a notebook ... but got a file".
     """
-    lines: list[str] = []
+    # ``# Databricks notebook source`` marks this file as a notebook so the
+    # CLI/workspace treat it as one (see docstring).
+    lines: list[str] = ["# Databricks notebook source"]
     seen_imports: set[str] = set()
     for imp in imports:
         if imp in seen_imports:
