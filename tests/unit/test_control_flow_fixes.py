@@ -13,7 +13,6 @@ from orchestra.bundler.dab_writer import _rewrite_post_branch_dependencies
 from orchestra.preparer.activity_preparers.for_each import _render_for_each_inputs_bridge
 from orchestra.translator.engine import _prune_dead_variable_inits
 
-
 # ---------------------------------------------------------------------------
 # Bug 1 — inputs-bridge notebook header
 # ---------------------------------------------------------------------------

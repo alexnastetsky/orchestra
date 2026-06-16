@@ -1267,9 +1267,7 @@ def _prune_dead_variable_inits(tasks: list[dict[str, Any]]) -> list[dict[str, An
     never change behaviour, so this is always safe.
     """
     init_keys = {
-        t["task_key"]
-        for t in tasks
-        if isinstance(t.get("task_key"), str) and t["task_key"].startswith("_init_")
+        t["task_key"] for t in tasks if isinstance(t.get("task_key"), str) and t["task_key"].startswith("_init_")
     }
     if not init_keys:
         return tasks
