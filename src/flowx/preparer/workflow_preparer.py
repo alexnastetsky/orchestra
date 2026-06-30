@@ -252,7 +252,7 @@ def _prepare_placeholder(activity: Activity) -> PreparedActivity:
         "# MAGIC %md\n"
         f"# MAGIC # Placeholder: {activity.name}\n"
         "# MAGIC\n"
-        f"# MAGIC Original ADF activity type: **{original_type}**\n"
+        f"# MAGIC Original source activity/operator type: **{original_type}**\n"
         "# MAGIC\n"
         f"# MAGIC {comment}\n" + arm_block + "\n# COMMAND ----------\n\n"
         f"raise NotImplementedError(\"Activity '{activity.name}' ({original_type}) needs agentic translation.\")\n"

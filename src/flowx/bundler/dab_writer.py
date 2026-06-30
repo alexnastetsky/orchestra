@@ -113,8 +113,10 @@ def write_bundle(
     # Bind clusters across the parent and inner workflows up front to decide whether databricks.yml needs
     # cluster tunables at all. Binding is idempotent, so _build_job_resource re-checking these is harmless.
     _bind_cluster_to_notebook_tasks(workflow.tasks)
+    _bind_cluster_to_spark_tasks(workflow.tasks)
     for inner in workflow.inner_workflows:
         _bind_cluster_to_notebook_tasks(inner.tasks)
+        _bind_cluster_to_spark_tasks(inner.tasks)
     bundle_uses_classic_cluster = _any_task_uses_classic_cluster(workflow.tasks) or any(
         _any_task_uses_classic_cluster(inner.tasks) for inner in workflow.inner_workflows
     )
@@ -867,6 +869,31 @@ def _any_task_uses_classic_cluster(tasks: list[dict[str, Any]]) -> bool:
     return any(task.get("job_cluster_key") for task in _iter_tasks_recursively(tasks))
 
 
+_SPARK_TASK_KEYS = ("spark_python_task", "spark_jar_task", "spark_submit_task")
+
+
+def _bind_cluster_to_spark_tasks(tasks: list[dict[str, Any]]) -> None:
+    """Binds a classic job_cluster to spark python/jar/submit tasks that lack compute.
+
+    These task types cannot run on serverless, so any that reach the bundler without a
+    cluster binding (e.g. Airflow's SparkSubmitOperator, which has no ADF-style
+    linked-service cluster to inherit) are bound to the classic job_cluster their
+    ``_compute_mode`` marker dictates, defaulting to the multi-node cluster.  ADF spark
+    tasks already carry ``existing_cluster_id`` / ``new_cluster`` from their linked
+    service and are skipped by the binding-key check.
+
+    Args:
+        tasks: Top-level task dicts (mutated in place).
+    """
+    for task in _iter_tasks_recursively(tasks):
+        if not any(key in task for key in _SPARK_TASK_KEYS):
+            continue
+        if any(key in task for key in _CLUSTER_BINDING_KEYS):
+            continue
+        compute_mode = task.get("_compute_mode")
+        task["job_cluster_key"] = COMPUTE_MODE_TO_CLUSTER_KEY.get(compute_mode or "", MULTI_NODE_JOB_CLUSTER_KEY)
+
+
 def _bind_cluster_to_notebook_tasks(tasks: list[dict[str, Any]]) -> None:
     """Binds notebook tasks to the cluster their compute_mode marker dictates.
 
@@ -1198,6 +1225,7 @@ def _build_job_resource(
 
     if attach_clusters:
         _bind_cluster_to_notebook_tasks(workflow.tasks)
+        _bind_cluster_to_spark_tasks(workflow.tasks)
         needed_keys = _collect_required_cluster_keys(workflow.tasks)
         if needed_keys:
             cluster_extras = _infer_bundle_cluster_extras(workflow)

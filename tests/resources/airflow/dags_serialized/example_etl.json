@@ -1,0 +1,80 @@
+{
+  "__version": 1,
+  "dag": {
+    "_dag_id": "example_etl",
+    "schedule_interval": "0 6 * * *",
+    "timezone": "UTC",
+    "catchup": false,
+    "default_args": {"retries": 2, "retry_delay": 300},
+    "params": {"env": "prod"},
+    "tags": ["example", "etl"],
+    "fileloc": "/dags/example_etl.py",
+    "tasks": [
+      {
+        "task_id": "start",
+        "_task_type": "EmptyOperator",
+        "_task_module": "airflow.operators.empty",
+        "downstream_task_ids": ["extract"]
+      },
+      {
+        "task_id": "wait_for_file",
+        "_task_type": "S3KeySensor",
+        "_task_module": "airflow.providers.amazon.aws.sensors.s3",
+        "template_fields": ["bucket_key"],
+        "bucket_key": "s3://data-bucket/{{ ds }}/_SUCCESS",
+        "downstream_task_ids": ["extract"]
+      },
+      {
+        "task_id": "extract",
+        "_task_type": "PythonOperator",
+        "_task_module": "airflow.operators.python",
+        "python_callable": "extract_data",
+        "template_fields": ["op_kwargs"],
+        "op_kwargs": {"run_date": "{{ ds }}", "env": "{{ params.env }}"},
+        "retries": 3,
+        "execution_timeout": 1800,
+        "downstream_task_ids": ["transform"]
+      },
+      {
+        "task_id": "transform",
+        "_task_type": "SparkSubmitOperator",
+        "_task_module": "airflow.providers.apache.spark.operators.spark_submit",
+        "template_fields": ["application", "application_args"],
+        "application": "/jobs/transform.py",
+        "application_args": ["--date", "{{ ds }}"],
+        "downstream_task_ids": ["run_databricks_job"]
+      },
+      {
+        "task_id": "run_databricks_job",
+        "_task_type": "DatabricksRunNowOperator",
+        "_task_module": "airflow.providers.databricks.operators.databricks",
+        "template_fields": ["job_id", "notebook_params"],
+        "job_id": 4321,
+        "notebook_params": {"env": "{{ params.env }}"},
+        "downstream_task_ids": ["branch"]
+      },
+      {
+        "task_id": "branch",
+        "_task_type": "BranchPythonOperator",
+        "_task_module": "airflow.operators.python",
+        "python_callable": "choose_branch",
+        "downstream_task_ids": ["notify", "cleanup"]
+      },
+      {
+        "task_id": "notify",
+        "_task_type": "BashOperator",
+        "_task_module": "airflow.operators.bash",
+        "template_fields": ["bash_command"],
+        "bash_command": "echo 'pipeline complete for {{ ds }}'",
+        "trigger_rule": "all_done",
+        "downstream_task_ids": []
+      },
+      {
+        "task_id": "cleanup",
+        "_task_type": "EmptyOperator",
+        "_task_module": "airflow.operators.empty",
+        "downstream_task_ids": []
+      }
+    ]
+  }
+}

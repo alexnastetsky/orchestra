@@ -44,14 +44,25 @@ from flowx.adapter.operations import (
 # the cheap commands (inputs, phase pass-throughs, materialize-lookup, workspace-paths) skip ~0.15s of
 # unused import cost on every adapter subprocess.
 
-# Maps the unified phase runner subcommands to the module CLI they forward to.
+# Maps the unified phase runner subcommands to the module CLI they forward to, per source
+# system. The package phase is source-agnostic (operates on the IR translation report), so
+# both sources share the same bundler entry point.
 _PHASE_MODULES: dict[str, str] = {
     "discover": "flowx.parser.adf_loader",
     "convert": "flowx.translator.engine",
     "package": "flowx.bundler.dab_writer",
 }
+_PHASE_MODULES_AIRFLOW: dict[str, str] = {
+    "discover": "flowx.parser.airflow_loader",
+    "convert": "flowx.translator.airflow_engine",
+    "package": "flowx.bundler.dab_writer",
+}
 # Aliases so the inputs option ids double as CLI flags on the phase runners.
 _PHASE_FLAG_ALIASES: dict[str, str] = {
+    "--adf-source-path": "--source-dir",
+}
+_AIRFLOW_FLAG_ALIASES: dict[str, str] = {
+    "--airflow-source-path": "--source-dir",
     "--adf-source-path": "--source-dir",
 }
 
@@ -425,8 +436,25 @@ def _run_phase(phase: str, forward: list[str]) -> int:
     """
     import importlib
 
-    module = importlib.import_module(_PHASE_MODULES[phase])
-    mapped = [_PHASE_FLAG_ALIASES.get(token, token) for token in (forward or [])]
+    # A leading/inline `--source {adf,airflow}` selects the source connector; it is consumed
+    # here and not forwarded to the phase CLI. Defaults to ADF for back-compat.
+    forward = list(forward or [])
+    source = "adf"
+    if "--source" in forward:
+        index = forward.index("--source")
+        if index + 1 < len(forward):
+            source = forward[index + 1]
+            del forward[index : index + 2]
+        else:
+            del forward[index]
+
+    if source == "airflow":
+        modules, aliases = _PHASE_MODULES_AIRFLOW, _AIRFLOW_FLAG_ALIASES
+    else:
+        modules, aliases = _PHASE_MODULES, _PHASE_FLAG_ALIASES
+
+    module = importlib.import_module(modules[phase])
+    mapped = [aliases.get(token, token) for token in forward]
     try:
         return module.main(mapped) or 0
     except SystemExit as exit_signal:  # e.g. argparse usage error -> parser.error() raises SystemExit
